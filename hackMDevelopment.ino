@@ -80,11 +80,15 @@ int getMenuSize() {
 // =====================================================
 int getFileCount() {
   File dir = SD.open(currentPath);
+  if (!dir) return 0;
+
   int count = 0;
 
   File file = dir.openNextFile();
+
   while (file) {
     count++;
+    file.close();                 // 🔴 IMPORTANT
     file = dir.openNextFile();
   }
 
@@ -196,12 +200,18 @@ void handleEncoder() {
 
   if (clkState != lastCLK && clkState == LOW) {
 
+    int maxItems = getMenuSize();
+
+    // 🔴 IMPORTANT FIX
+    if (maxItems <= 0) {
+      lastCLK = clkState;
+      return;
+    }
+
     if (digitalRead(DT) != clkState) menuIndex++;
     else menuIndex--;
 
-    int maxItems = getMenuSize();
-
-    // 🔁 CYCLIC
+    // 🔁 CYCLIC SAFE
     if (menuIndex >= maxItems) menuIndex = 0;
     if (menuIndex < 0) menuIndex = maxItems - 1;
 
