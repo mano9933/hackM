@@ -49,6 +49,7 @@ const char *uidMenu[] = {"Save", "Clone"};
 char currentPath[40] = "/";
 File currentDir;
 bool inIR = false;   // to allow folder navigation
+int fileCount = 0;
 
 // ================= BUTTON ==============
 unsigned long pressStart = 0;
@@ -70,7 +71,7 @@ int getMenuSize() {
     case RFID_MENU: return 2;
     case UID_MENU: return 2;
     case KEYBOARD_MENU: return 38;
-    case FILE_BROWSER: return getFileCount();
+    case FILE_BROWSER: return fileCount;
     default: return 1;
   }
 }
@@ -88,14 +89,13 @@ int getFileCount() {
 
   while (file) {
     count++;
-    file.close();                 // 🔴 IMPORTANT
+    file.close();               // 🔥 IMPORTANT
     file = dir.openNextFile();
   }
 
   dir.close();
   return count;
 }
-
 // =====================================================
 // 🔹 DISPLAY MENU
 // =====================================================
@@ -122,9 +122,27 @@ void displayMenu(const char **menu, int size) {
 // 🔹 DISPLAY FILES
 // =====================================================
 void displayFiles() {
+
   lcd.clear();
 
   File dir = SD.open(currentPath);
+  if (!dir) {
+    lcd.print("Dir Error");
+    return;
+  }
+
+  int total = fileCount;   // use cached value
+
+  if (total == 0) {
+    lcd.print("No Files");
+    return;
+  }
+
+  // 🔁 SCROLL WINDOW
+  int start = menuIndex;
+  if (start > total - 2) start = total - 2;
+  if (start < 0) start = 0;
+
   int index = 0;
   int shown = 0;
 
@@ -132,7 +150,8 @@ void displayFiles() {
 
   while (file) {
 
-    if (index >= menuIndex && shown < 2) {
+    if (index >= start && shown < 2) {
+
       lcd.setCursor(0, shown);
 
       if (index == menuIndex) lcd.print("> ");
@@ -150,11 +169,14 @@ void displayFiles() {
       }
 
       lcd.print(name);
+
       shown++;
     }
 
     index++;
-    file = dir.openNextFile();
+
+    file.close();                // 🔥 VERY IMPORTANT
+    file = dir.openNextFile();   // move to next
   }
 
   dir.close();
@@ -202,7 +224,6 @@ void handleEncoder() {
 
     int maxItems = getMenuSize();
 
-    // 🔴 IMPORTANT FIX
     if (maxItems <= 0) {
       lastCLK = clkState;
       return;
@@ -211,7 +232,7 @@ void handleEncoder() {
     if (digitalRead(DT) != clkState) menuIndex++;
     else menuIndex--;
 
-    // 🔁 CYCLIC SAFE
+    // 🔁 CYCLIC
     if (menuIndex >= maxItems) menuIndex = 0;
     if (menuIndex < 0) menuIndex = maxItems - 1;
 
@@ -262,6 +283,7 @@ void selectItem() {
     else if (menuIndex == 2) {
       strcpy(currentPath, "/usb");
       currentState = FILE_BROWSER;
+      //fileCount = getFileCount();  
       inIR = false;
     }
 
@@ -273,6 +295,7 @@ void selectItem() {
     if (menuIndex == 1) {
       strcpy(currentPath, "/ir");
       currentState = FILE_BROWSER;
+      fileCount = getFileCount();  
       inIR = true;
       menuIndex = 0;
     }
@@ -283,6 +306,7 @@ void selectItem() {
     if (menuIndex == 1) {
       strcpy(currentPath, "/rfid");
       currentState = FILE_BROWSER;
+      fileCount = getFileCount();   // 🔥 IMPORTANT
       inIR = false;
       menuIndex = 0;
     }
