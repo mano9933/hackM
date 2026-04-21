@@ -32,6 +32,7 @@ enum State {
   RFID_SCAN_MENU,
   SHOW_UID,
   UID_MENU,
+  SAVED_UID_MENU,
   KEYBOARD_MENU,
   FILE_BROWSER
 };
@@ -44,6 +45,7 @@ const char *mainMenu[] = {"IR", "RFID", "USB", "Battery"};
 const char *irMenu[]   = {"Clone", "Saved"};
 const char *rfidMenu[] = {"Scan", "Saved"};
 const char *uidMenu[] = {"Save", "Clone"};
+const char *savedUidMenu[] = {"Clone", "Delete"};
 
 // ================= FILE SYSTEM =========
 char currentPath[40] = "/";
@@ -71,6 +73,7 @@ int getMenuSize() {
     case RFID_MENU: return 2;
     case UID_MENU: return 2;
     case KEYBOARD_MENU: return 38;
+    case SAVED_UID_MENU: return 2; 
     case FILE_BROWSER: return fileCount;
     default: return 1;
   }
@@ -211,6 +214,7 @@ void updateMenu() {
     case FILE_BROWSER: displayFiles(); break;
     case RFID_SCAN_MENU: readUID(); break;
     case UID_MENU: displayMenu(uidMenu, 2); break;
+    case SAVED_UID_MENU: displayMenu(savedUidMenu, 2); break;
   }
 }
 
@@ -343,7 +347,6 @@ void selectItem() {
   }
 
   else if (currentState == FILE_BROWSER) {
-
     File dir = SD.open(currentPath);
     File file = dir.openNextFile();
     int i = 0;
@@ -366,6 +369,7 @@ void selectItem() {
     }
 
     dir.close();
+    currentState = SAVED_UID_MENU;
   }
 }
 
@@ -381,7 +385,12 @@ void goBack() {
   else if (currentState == IR_MENU || currentState == RFID_MENU) {
     currentState = MAIN_MENU;
   }
-
+  else if (currentState == SHOW_UID ||(currentState == FILE_BROWSER && currentPath == "/rfid")){
+    currentState = RFID_MENU;
+  }
+  else if (currentState == SAVED_UID_MENU) {
+    currentState = FILE_BROWSER;   // ✅ go back to file list
+  }
   menuIndex = 0;
 }
 
