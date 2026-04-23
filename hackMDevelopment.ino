@@ -346,26 +346,63 @@ void selectItem() {
     }
   }
 
-  else if (currentState == FILE_BROWSER) {
+  else if(currentState == FILE_BROWSER && strcmp(currentPath, "/rfid") == 0)
+  {
+    currentState = SAVED_UID_MENU;
+  }
+
+  else if(currentState == SAVED_UID_MENU)
+  {
+    if(menuIndex == 0)
+    {
+      //call clone function
+    }
+    else if (menuIndex == 1)
+    {
+      //delete the uid
+    }
+  }
+
+  else if (currentState == FILE_BROWSER && strcmp(currentPath, "/ir") == 0)
+  {
+    if (fileCount == 0) return;
+
     File dir = SD.open(currentPath);
-    File file = dir.openNextFile();
+    if (!dir) return;
+
+    dir.rewindDirectory();   // 🔥 CRITICAL FIX
+
+    File file;
     int i = 0;
 
-    while (file) {
+    while (true) {
+
+      file = dir.openNextFile();
+      if (!file) break;
 
       if (i == menuIndex) {
 
         if (file.isDirectory() && inIR) {
           strcat(currentPath, "/");
           strcat(currentPath, file.name());
+          fileCount = getFileCount();
           menuIndex = 0;
+
+          file.close();
+          dir.close();
+          return;
         }
 
-        break;
+        // ✅ file selected
+        file.close();
+        dir.close();
+
+        menuIndex = 0;
+        return;
       }
 
+      file.close();   // 🔥 VERY IMPORTANT
       i++;
-      file = dir.openNextFile();
     }
 
     dir.close();
@@ -378,14 +415,10 @@ void selectItem() {
 // =====================================================
 void goBack() {
 
-  if (currentState == FILE_BROWSER) {
-    currentState = MAIN_MENU;
-    strcpy(currentPath, "/");
-  }
-  else if (currentState == IR_MENU || currentState == RFID_MENU) {
+   if (currentState == IR_MENU || currentState == RFID_MENU) {
     currentState = MAIN_MENU;
   }
-  else if (currentState == SHOW_UID ||(currentState == FILE_BROWSER && currentPath == "/rfid")){
+  else if (currentState == SHOW_UID ||(currentState == FILE_BROWSER && strcmp(currentPath, "/rfid") == 0)){
     currentState = RFID_MENU;
   }
   else if (currentState == SAVED_UID_MENU) {
