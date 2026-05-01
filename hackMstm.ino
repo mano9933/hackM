@@ -689,7 +689,7 @@ void selectItem() {
     }
   }
 
-  else if(currentState == DELETE_MENU && strcmp(currentPath, "/rfid") == 0)
+  else if(currentState == DELETE_MENU)
   {
     if(menuIndex == 0)
     {
