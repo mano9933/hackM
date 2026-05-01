@@ -28,6 +28,7 @@ byte storedUID[4];
 #define RAW_BUFFER 180
 #define TEXT_BUFFER 900 
 uint16_t dataLength = 0;
+bool saveToExisting = false;
 
 // ================= ENCODER =============
 #define CLK D6
@@ -148,6 +149,7 @@ int getMenuSize() {
     case DELETE_MENU: return 2;
     case IR_CODE_MENU: return 3;
     case SAVED_REMOTE_MENU: return 2;
+    case REMOTE_BUTTONS_MENU: return fileCount;
     case FILE_BROWSER: return fileCount;
     default: return 1;
   }
@@ -569,7 +571,12 @@ void selectItem() {
     }
     else if(menuIndex == 1)
     {
-      //save to existing
+      strcpy(currentPath, "/ir");
+      currentState = FILE_BROWSER;
+      fileCount = getFileCount();  
+      inIR = true;
+      menuIndex = 0;
+      saveToExisting = true;
     }
     else if(menuIndex == 2)
     {
@@ -580,26 +587,43 @@ void selectItem() {
   else if(currentState == FILE_BROWSER && strcmp(currentPath, "/ir") == 0)
   {
     openFolder(currentPath,menuIndex);
-    currentState = REMOTE_BUTTONS_MENU;
     fileCount = getFileCount();
+    if(saveToExisting)
+    {
+      showKeyboard();
+      lcd.clear();
+      lcd.noBlink();
+      lcd.noCursor();
+      char newFileName[32];
+      snprintf(newFileName, sizeof(newFileName), "/%s/%s.txt", currentPath,fileName);
+      writeFile(newFileName,text);
+      delay(1500);
+      currentState = IR_MENU;
+      saveToExisting = false;
+    }
+    else
+    {
+      currentState = REMOTE_BUTTONS_MENU;
+    }
   }
 
   else if(currentState == REMOTE_BUTTONS_MENU)
   {
     currentState = SAVED_REMOTE_MENU;
+    readFileByIndex(currentPath,menuIndex);
+    deleteMenuIndex = menuIndex;
   }
 
   else if(currentState == SAVED_REMOTE_MENU)
   {
     if(menuIndex == 0)
-    {
-      readFileByIndex(currentPath,previousMenuIndex);
+    {  
       transmitIR();
       currentState = REMOTE_BUTTONS_MENU;
     }
-    else
+    else if (menuIndex == 1)
     {
-      //delete
+      currentState = DELETE_MENU;
     }
   }
 
@@ -649,6 +673,7 @@ void selectItem() {
   {
     currentState = SAVED_UID_MENU;
     readFileByIndex(currentPath,previousMenuIndex);
+    deleteMenuIndex = menuIndex;
   }
 
   else if(currentState == SAVED_UID_MENU)
@@ -661,7 +686,6 @@ void selectItem() {
     else if (menuIndex == 1)
     {
       currentState = DELETE_MENU;
-      deleteMenuIndex = previousMenuIndex;
     }
   }
 
