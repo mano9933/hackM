@@ -2,6 +2,8 @@
 #include <LiquidCrystal_I2C.h>
 #include <SdFat.h>
 #include <MFRC522.h>
+#include <IRremote.hpp>
+#include <string.h>
 
 // ================= SPI OBJECTS =================
 SPIClass SPI_1(PA7, PA6, PA5);     // RFID
@@ -13,11 +15,19 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // ================= SD ==================
 #define CS_PIN D5
 SdFat SD;
+
 // ================= RFID ==================
 #define RST_PIN D9
 #define SS_PIN D10   // RFID CS
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 byte storedUID[4];
+
+// ================= IR ==================
+#define RECV_PIN D4
+#define IR_SEND_PIN D3
+#define RAW_BUFFER 180
+#define TEXT_BUFFER 900 
+uint16_t dataLength = 0;
 
 // ================= ENCODER =============
 #define CLK D6
@@ -40,6 +50,9 @@ enum State {
   SAVED_UID_MENU,
   KEYBOARD_MENU,
   DELETE_MENU,
+  IR_CODE_MENU,
+  REMOTE_BUTTONS_MENU,
+  SAVED_REMOTE_MENU,
   FILE_BROWSER
 };
 
@@ -91,8 +104,23 @@ const char* const deleteMenu[] PROGMEM = {
   deleteMenu0, deleteMenu1
 };
 
+const char irCodeMenu0[] PROGMEM = "Save-New";
+const char irCodeMenu1[] PROGMEM = "Save-Existing";
+const char irCodeMenu2[] PROGMEM = "Transmit";
+
+const char* const irCodeMenu[] PROGMEM = {
+  irCodeMenu0, irCodeMenu1, irCodeMenu2
+};
+
+const char savedRemoteMenu0[] PROGMEM = "Transmit";
+const char savedRemoteMenu1[] PROGMEM = "Delete";
+
+const char* const savedRemoteMenu[] PROGMEM = {
+  savedRemoteMenu0, savedRemoteMenu1
+};
+
 // ================= FILE SYSTEM =========
-char currentPath[6] = "/";
+char currentPath[50] = "/";
 bool inIR = false;   // to allow folder navigation
 int fileCount = 0;
 
@@ -102,7 +130,7 @@ bool buttonHeld = false;
 
 // ================= Keyboard Variables ==============
 char fileName[10];
-char text[100];
+char text[TEXT_BUFFER];
 const char chars[] = " 0123456789abcdefghijklmnopqrstuvwxyz_";
 const int charCount = sizeof(chars) - 1;
 
@@ -118,6 +146,8 @@ int getMenuSize() {
     case KEYBOARD_MENU: return 38;
     case SAVED_UID_MENU: return 2;
     case DELETE_MENU: return 2;
+    case IR_CODE_MENU: return 3;
+    case SAVED_REMOTE_MENU: return 2;
     case FILE_BROWSER: return fileCount;
     default: return 1;
   }
@@ -347,6 +377,65 @@ void deleteFileByIndex(const char *dirname, int index) {
 }
 
 // =====================================================
+// 🔹 CREATE FOLDER
+// =====================================================
+void createFolder(const char *path)
+{
+  if (SD.mkdir(path)) {
+    Serial.println("Folder created");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(F("Remote Created"));
+    delay(1500);
+  } else {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(F("Failed!"));
+    delay(1500);
+    currentState = IR_MENU;
+  }
+}
+
+// =====================================================
+// 🔹 OPEN FOLDER
+// =====================================================
+void openFolder(const char *dirname, int index) {
+  File dir = SD.open(dirname);
+
+  if (!dir || !dir.isDirectory()) {
+    Serial.println("Invalid directory");
+    return;
+  }
+
+  File file = dir.openNextFile();
+  int i = 0;
+
+  while (file) {
+
+    if (i == index) {
+
+      char name[50];
+      file.getName(name, sizeof(name));   // ✅ correct way
+
+      char fullPath[100];
+      snprintf(fullPath, sizeof(fullPath), "%s/%s", dirname, name);
+      strncpy(currentPath, fullPath, sizeof(currentPath) - 1);
+      currentPath[sizeof(currentPath) - 1] = '\0';
+      
+      file.close();
+      dir.close();
+      return;
+    }
+
+    file = dir.openNextFile();
+    i++;
+  }
+
+  Serial.println("Invalid index");
+  dir.close();
+}
+
+// =====================================================
 // 🔹 UPDATE DISPLAY
 // =====================================================
 void updateMenu() {
@@ -359,6 +448,9 @@ void updateMenu() {
     case UID_MENU: displayMenu(uidMenu, 2); break;
     case SAVED_UID_MENU: displayMenu(savedUidMenu, 2); break;
     case DELETE_MENU: displayMenu(deleteMenu,2); break;
+    case IR_CODE_MENU: displayMenu(irCodeMenu,3); break;
+    case REMOTE_BUTTONS_MENU: displayFiles(); break;
+    case SAVED_REMOTE_MENU:displayMenu(savedRemoteMenu,2); break;
   }
 }
 
@@ -447,6 +539,68 @@ void selectItem() {
       inIR = true;
       menuIndex = 0;
     }
+    else if(menuIndex == 0)
+    {
+      receiveIR();
+    }
+  }
+
+  else if(currentState == IR_CODE_MENU)
+  {
+    if(menuIndex == 0)
+    {
+      currentState = KEYBOARD_MENU;
+      showKeyboard();
+      lcd.clear();
+      lcd.noBlink();
+      lcd.noCursor();
+      char newFileName[32];
+      snprintf(newFileName, sizeof(newFileName), "/ir/%s", fileName);
+      createFolder(newFileName);
+
+      showKeyboard();
+      lcd.clear();
+      lcd.noBlink();
+      lcd.noCursor();
+      snprintf(newFileName, sizeof(newFileName), "%s/%s.txt", newFileName,fileName);
+      writeFile(newFileName,text);
+      delay(1500);
+      currentState = IR_MENU;
+    }
+    else if(menuIndex == 1)
+    {
+      //save to existing
+    }
+    else if(menuIndex == 2)
+    {
+      transmitIR();
+    }
+  }
+
+  else if(currentState == FILE_BROWSER && strcmp(currentPath, "/ir") == 0)
+  {
+    openFolder(currentPath,menuIndex);
+    currentState = REMOTE_BUTTONS_MENU;
+    fileCount = getFileCount();
+  }
+
+  else if(currentState == REMOTE_BUTTONS_MENU)
+  {
+    currentState = SAVED_REMOTE_MENU;
+  }
+
+  else if(currentState == SAVED_REMOTE_MENU)
+  {
+    if(menuIndex == 0)
+    {
+      readFileByIndex(currentPath,previousMenuIndex);
+      transmitIR();
+      currentState = REMOTE_BUTTONS_MENU;
+    }
+    else
+    {
+      //delete
+    }
   }
 
   else if (currentState == RFID_MENU) {
@@ -475,7 +629,7 @@ void selectItem() {
     if(menuIndex == 0)
     {
       currentState = KEYBOARD_MENU;
-      showKeyboard(); 
+      showKeyboard();
       lcd.clear();
       lcd.noBlink();
       lcd.noCursor();
@@ -524,7 +678,7 @@ void selectItem() {
     }
   }
 
-  else if (currentState == FILE_BROWSER && strcmp(currentPath, "/ir") == 0)
+  /*else if (currentState == FILE_BROWSER && strcmp(currentPath, "/ir") == 0)
   {
     if (fileCount == 0) return;
 
@@ -571,7 +725,7 @@ void selectItem() {
 
     dir.close();
     currentState = SAVED_UID_MENU;
-  }
+  }*/
 }
 
 // =====================================================
@@ -772,6 +926,115 @@ void showKeyboard() {
   }
 }
 
+// ====================== RECEIVE IR ======================
+void receiveIR() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Press the remote...");
+
+  while(1)
+  {
+    if (IrReceiver.decode()) {
+
+      uint16_t len = IrReceiver.irparams.rawlen;
+
+      if (len > 60) {
+
+        dataLength = len - 1;
+
+        compressToText();
+
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Success");
+        delay(1500);
+        currentState = IR_CODE_MENU;
+        Serial.println(F("✅ Signal stored as HEX text"));
+        break;
+
+      } else {
+        Serial.println(F("⚠️ Noise ignored"));
+      }
+
+      IrReceiver.resume();
+    }
+  }
+}
+
+// ====================== COMPRESS TO TEXT ======================
+void compressToText() {
+
+  uint16_t index = 0;
+
+  for (uint16_t i = 1; i <= dataLength; i++) {
+
+    uint16_t val = IrReceiver.irparams.rawbuf[i] * 50;
+
+    // 🔥 store as 4-digit HEX
+    index += sprintf(&text[index], "%04X", val);
+
+    // separator
+    text[index++] = ' ';
+
+    if (index >= TEXT_BUFFER - 6) break;
+  }
+
+  text[index] = '\0';
+}
+
+// ====================== TEXT TO RAW ======================
+void textToRaw(uint16_t rawData[]) {
+
+  uint16_t i = 0;
+
+  // strtok modifies string → use directly (safe here)
+  char *ptr = strtok(text, " ");
+
+  while (ptr != NULL && i < RAW_BUFFER) {
+    rawData[i++] = strtol(ptr, NULL, 16);
+    ptr = strtok(NULL, " ");
+  }
+
+  dataLength = i;
+}
+
+// ====================== TRANSMIT ======================
+void transmitIR() {
+
+  if (strlen(text) == 0) {
+    Serial.println(F("⚠️ No signal stored!"));
+    return;
+  }
+
+  Serial.println(F("Rebuilding signal..."));
+
+  static uint16_t rawData[RAW_BUFFER];  // 🔥 static = no stack overflow
+
+  textToRaw(rawData);
+
+  Serial.println(F("📡 Transmitting..."));
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Transmitting...");
+
+  IrReceiver.stop();
+  delay(30);
+
+  for (uint8_t i = 0; i < 3; i++) {
+    IrSender.sendRaw(rawData, dataLength, 38);
+    delay(100);
+  }
+
+  IrReceiver.start();
+
+  Serial.println(F("✅ Done"));
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Done");
+  delay(1500);
+  currentState = IR_CODE_MENU;
+}
+
 // =====================================================
 // 🔹 SETUP
 // =====================================================
@@ -807,6 +1070,10 @@ void setup() {
   }
 
   Serial.println("\n=== SYSTEM READY (DUAL SPI + RECONFIG) ===");
+
+  // ===== IR INIT =====
+  IrReceiver.begin(RECV_PIN, ENABLE_LED_FEEDBACK);
+  IrSender.begin(IR_SEND_PIN);
 
   lastCLK = digitalRead(CLK);
 
